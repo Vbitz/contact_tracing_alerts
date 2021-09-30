@@ -2,9 +2,66 @@ const CONTACT_TRACING_LIST = "https://www.qld.gov.au/health/conditions/health-al
 const WEBHOOK_URLS = []; // Enter your own Discord webhook URLs.
 const PROP_VERSION = "v1";
 
-function sendMessageToDiscord(message) {
-  for (const discordUrl of WEBHOOK_URLS) {
-    var payload = JSON.stringify({content: message});
+function processMessageToDiscord(urls, updates, testMode) {
+  const props = PropertiesService.getUserProperties();
+
+  const suburbs = {};
+
+  const updateProps = [];
+
+  for (const update of updates) {
+    if (JSON.stringify(suburbs).length > 2000) {
+      break;
+    }
+
+    const propString = JSON.stringify(update) + "_" + PROP_VERSION;
+
+    if (props.getProperty(propString) === "true" && !testMode) {
+      continue;
+    }
+
+    if (suburbs[update.suburb] === undefined) {
+      Logger.log("Adding Suburb: %s", update.suburb)
+      suburbs[update.suburb] = [];
+    }
+
+    suburbs[update.suburb].push(update);
+
+    updateProps.push(propString);
+  }
+
+  const embeds = [];
+
+  for (const name in suburbs) {
+    let fields = [];
+    for (const update of suburbs[name]) {
+      fields.push(formatUpdate(update));
+    }
+
+    embeds.push({
+      "title": name,
+      "description": "Alerts for: **" + name + "**",
+      "color": 8130835,
+      "timestamp": new Date().toISOString(),
+      "footer": {
+        "text": "https://github.com/Vbitz/contact_tracing_alerts"
+      },
+      "author": {
+        "name": "Queensland Health Contact Tracing (Source)",
+        "url": "https://www.qld.gov.au/health/conditions/health-alerts/coronavirus-covid-19/current-status/contact-tracing"
+      },
+      "fields": fields
+    })
+  }
+
+  if (embeds.length === 0) {
+    return;
+  }
+
+  for (const discordUrl of urls) {
+    var payload = JSON.stringify({
+      "embeds": embeds
+    });
 
     var params = {
       headers: {
@@ -18,6 +75,12 @@ function sendMessageToDiscord(message) {
     var response = UrlFetchApp.fetch(discordUrl, params);
 
     Logger.log(response.getContentText());
+  }
+
+  if (!testMode) {
+    for (const str of updateProps) {
+      props.setProperty(str, "true");
+    }
   }
 }
 
@@ -64,43 +127,19 @@ function getCurrentContactTracingUpdates() {
 function formatUpdate(update) {
   const {date, advice, location, address, suburb, datetext, timetext, added} = update;
 
-  return `\`${datetext} ${timetext}\` | ${location} ${address} ${suburb} | **${advice}**`;
+  return {name: datetext + " : " + timetext, value: `${location} ${address}\n**${advice}**`};
 }
 
 function EntryPoint() {
   const contactTracingUpdates = getCurrentContactTracingUpdates();
 
-  const props = PropertiesService.getUserProperties();
+  processMessageToDiscord(WEBHOOK_URLS, contactTracingUpdates, false);
+}
 
-  let discordMessage = "(Source: https://www.qld.gov.au/health/conditions/health-alerts/coronavirus-covid-19/current-status/contact-tracing)\n\n";
+function TestFunction() {
+  const contactTracingUpdates = getCurrentContactTracingUpdates();
 
-  const updateProps = [];
-
-  for (const update of contactTracingUpdates) {
-    const propString = JSON.stringify(update) + "_" + PROP_VERSION;
-
-    if (props.getProperty(propString) === "true") {
-      continue;
-    }
-
-    const nextLine = formatUpdate(update) + "\n";
-
-    if ((discordMessage + nextLine).length > 2000) {
-      break;
-    }
-    
-    discordMessage += nextLine;
-
-    updateProps.push(propString);
-  }
-
-  if (updateProps.length !== 0) {
-    sendMessageToDiscord(discordMessage);
-  }
-
-  for (const str of updateProps) {
-    props.setProperty(str, "true");
-  }
+  processMessageToDiscord([WEBHOOK_URLS[0]], contactTracingUpdates, true);
 }
 
 function doGet() {
