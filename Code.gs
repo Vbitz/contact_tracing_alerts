@@ -50,6 +50,11 @@ function getCurrentContactTracingUpdates() {
     const timetext = unescape(row.attr("data-timetext"));
     const added = unescape(row.attr("data-added"));
 
+    // No more Townsville spam for Brisbane folks.
+    if (suburb.indexOf("Townsville") !== -1) {
+      return;
+    }
+
     results.push({date, advice, location, address, suburb, datetext, timetext, added});
   });
 
